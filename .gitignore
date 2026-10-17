@@ -1,0 +1,21 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+env/
+.venv/
+venv/
+ENV/
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local backups and editor settings
+*.original
+*.bak
+.idea/
+.vscode/
+.agents/
+.codex/
