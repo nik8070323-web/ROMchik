@@ -32,7 +32,7 @@ def get_lecture_files(subject):
         return []
 
     path = BASE_DIR / "лекции" / folder
-    return sorted(path.glob("*.pdf"))
+    return sorted(file for file in path.glob("*.pdf") if file.is_file())
 
 
 @router.callback_query(F.data == "materials")
@@ -69,7 +69,8 @@ async def open_subject(callback: CallbackQuery):
 
     if not files:
         await callback.message.edit_text(
-            f"Для предмета «{subject}» файлов пока нет."
+            f"Для предмета «{subject}» файлов пока нет.",
+            reply_markup=get_subjects_keyboard()
         )
         return
 
@@ -82,9 +83,9 @@ async def open_subject(callback: CallbackQuery):
         )
 
     builder.row(
-    InlineKeyboardButton(
-        text="← Назад",
-        callback_data="materials"
+        InlineKeyboardButton(
+            text="← Назад",
+            callback_data="materials"
         )
     )
     builder.adjust(1)
@@ -97,33 +98,44 @@ async def open_subject(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("file:"))
 async def send_lecture(callback: CallbackQuery):
-    await callback.answer()
+    parts = (callback.data or "").split(":", 2)
 
-    _, subject, index = callback.data.split(":", 2)
-    files = get_lecture_files(subject)
-
-    if not index.isdigit() or int(index) >= len(files):
+    if len(parts) != 3:
+        await callback.answer("Некорректная кнопка", show_alert=True)
         return
 
-    if not isinstance(callback.message, Message):
+    _, subject, index = parts
+    files = get_lecture_files(subject)
+
+    if not index.isascii() or not index.isdecimal() or len(index) > 10:
+        await callback.answer("Некорректный номер файла", show_alert=True)
+        return
+
+    if int(index) >= len(files):
+        await callback.answer("Файл не найден", show_alert=True)
         return
 
     file = files[int(index)]
 
-    await callback.message.answer_document(
-        document=FSInputFile(file),
-        caption=f"📄 {file.stem}"
-    )
+    if not file.is_file():
+        await callback.answer("Файл не найден", show_alert=True)
+        return
 
+    await callback.answer()
+
+    if isinstance(callback.message, Message):
+        await callback.message.answer_document(
+            document=FSInputFile(file),
+            caption=f"📄 {file.stem}"
+        )
 
 @router.callback_query(F.data.startswith("additional:"))
 async def send_additional(callback: CallbackQuery):
-    await callback.answer()
-
     name = callback.data.split(":", 1)[1]
     filename = EXTRA_FILES.get(name)
 
     if filename is None:
+        await callback.answer("Файл не найден", show_alert=True)
         return
 
     path = BASE_DIR / "лекции" / "дополнительно" / filename
@@ -134,6 +146,8 @@ async def send_additional(callback: CallbackQuery):
             show_alert=True
         )
         return
+
+    await callback.answer()
 
     if isinstance(callback.message, Message):
         await callback.message.answer_document(

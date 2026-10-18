@@ -19,7 +19,10 @@ cp aiogram-learning/.env.example aiogram-learning/.env
 
 ```dotenv
 BOT_TOKEN=your_bot_token_here
+ADMIN_IDS=
 ```
+
+Для доступа к `/admin` укажите в `ADMIN_IDS` Telegram ID администраторов через запятую. Если список пуст, доступ закрыт для всех.
 
 Запустите бота:
 
