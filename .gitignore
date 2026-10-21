@@ -19,3 +19,6 @@ __pycache__/
 .vscode/
 .agents/
 .codex/
+
+# Incomplete material uploads and replacement recovery files
+.upload-*

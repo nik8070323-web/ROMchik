@@ -18,7 +18,7 @@ button_additional = InlineKeyboardButton(
 )
 
 button_lec = InlineKeyboardButton(
-    text = "Лекции",
+    text = "Учебные материалы",
     callback_data = 'materials'
 )
 # Клавиатуры

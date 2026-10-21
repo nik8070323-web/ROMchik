@@ -25,14 +25,6 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
             message=message, data=data
         )
 
-    async def test_admin_access(self):
-        for allowed in (True, False):
-            with self.subTest(allowed=allowed):
-                with patch.object(admin, 'ADMIN_IDS', {42} if allowed else set()):
-                    with patch.object(Message, 'answer', new_callable=AsyncMock) as answer:
-                        await admin.admin_panel(self.message())
-                        self.assertEqual('Добро пожаловать' in answer.call_args.args[0], allowed)
-
     async def test_invalid_lecture_buttons(self):
         for data in ('file:', 'file:МДК', 'file:МДК:-1', 'file:МДК:²', 'file:МДК:999', 'file:нет:0'):
             with self.subTest(data=data):

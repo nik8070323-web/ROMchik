@@ -1,4 +1,5 @@
 from aiogram import Router, F
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from keyboards.menu import keyboard, back_keyboard
@@ -7,7 +8,9 @@ router = Router()
 
 # Обработка нажатия кнопки "Открыть профиль"
 @router.callback_query(F.data == "profile")
-async def callback_profile(callback: CallbackQuery):
+async def callback_profile(callback: CallbackQuery, state: FSMContext = None):
+    if state is not None:
+        await state.clear()
     await callback.answer()
 
     user = callback.from_user
@@ -33,7 +36,9 @@ async def callback_profile(callback: CallbackQuery):
 
 # Обработка кнопки "Назад"
 @router.callback_query(F.data == "back")
-async def callback_back(callback: CallbackQuery):
+async def callback_back(callback: CallbackQuery, state: FSMContext = None):
+    if state is not None:
+        await state.clear()
     await callback.answer()
 
     if isinstance(callback.message, Message):

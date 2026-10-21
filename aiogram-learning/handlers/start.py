@@ -2,6 +2,7 @@ from pathlib import Path
 
 from aiogram import Router
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, FSInputFile
 
 from keyboards.menu import keyboard
@@ -11,7 +12,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 @router.message(Command("start"))
-async def start_handler(message: Message):
+async def start_handler(message: Message, state: FSMContext = None):
+    if state is not None:
+        await state.clear()
     path = BASE_DIR.parent / "images" / "welcome.png"
 
     if path.is_file():
