@@ -5,7 +5,7 @@ from aiogram.filters import BaseFilter
 from aiogram.types import Message, CallbackQuery
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
 ADMIN_IDS = {
     int(user_id.strip())

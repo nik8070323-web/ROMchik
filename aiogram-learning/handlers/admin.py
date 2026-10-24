@@ -11,8 +11,8 @@ from filters.admin import AdminFilter
 from keyboards.admin import (buttons, cancel_keyboard, get_admin_subjects_keyboard,
                              keyboard_admin, kinds_keyboard, material_list_keyboard)
 from keyboards.menu import keyboard as main_keyboard
-from services.materials import (ConflictError, FOLDERS, KINDS, LimitedBuffer,
-                               repository, parse_number, validate_document)
+from services.materials import (ConflictError, FOLDERS, SECTIONS, KINDS, LimitedBuffer,
+                               repository, parse_number, validate_document, validate_title)
 from states.material import AddMaterial
 
 router = Router()
@@ -69,7 +69,7 @@ async def menu(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(AddMaterial.subject, F.data.startswith("admin:subject:"))
 async def select_subject(callback: CallbackQuery, state: FSMContext):
     subject = callback.data.split(":", 2)[2]
-    if subject not in FOLDERS:
+    if subject not in SECTIONS:
         await callback.answer("Неизвестный предмет", show_alert=True)
         return
     await callback.answer()
@@ -90,7 +90,7 @@ async def select_kind(callback: CallbackQuery, state: FSMContext):
     await screen(callback, "Введите номер материала от 1 до 999999.", cancel_keyboard("admin:to_kind"))
 
 
-@router.callback_query(StateFilter(AddMaterial.number, AddMaterial.file, AddMaterial.confirm), F.data.in_({"admin:to_kind", "admin:to_number", "admin:to_file"}))
+@router.callback_query(StateFilter(AddMaterial.number, AddMaterial.title, AddMaterial.file, AddMaterial.confirm), F.data.in_({"admin:to_kind", "admin:to_number", "admin:to_file"}))
 async def step_back(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     data = await state.get_data()
@@ -112,7 +112,29 @@ async def get_lecture_number(message: Message, state: FSMContext):
     except ValueError as exc:
         await message.answer(str(exc), reply_markup=cancel_keyboard("admin:to_kind"))
         return
-    await state.update_data(number=number, target_uid=None)
+    await state.update_data(number=number, target_uid=None, title=None)
+    await state.set_state(AddMaterial.title)
+    await message.answer("Введите название материала или нажмите «Пропустить».", reply_markup=buttons(
+        ("Пропустить", "admin:skip_title"), ("↩️ Назад", "admin:to_number"), ("Отмена", "admin:back")))
+
+
+@router.callback_query(AddMaterial.title, F.data == "admin:skip_title")
+async def skip_title(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await state.update_data(title=None)
+    await state.set_state(AddMaterial.file)
+    await screen(callback, "📎 Отправьте PDF или DOCX до 20 МБ.", cancel_keyboard("admin:to_number"))
+
+
+@router.message(AddMaterial.title)
+async def get_material_title(message: Message, state: FSMContext):
+    try:
+        title = validate_title(message.text)
+    except ValueError as exc:
+        await message.answer(str(exc), reply_markup=buttons(
+            ("Пропустить", "admin:skip_title"), ("↩️ Назад", "admin:to_number"), ("Отмена", "admin:back")))
+        return
+    await state.update_data(title=title)
     await state.set_state(AddMaterial.file)
     await message.answer("📎 Отправьте PDF или DOCX до 20 МБ.", reply_markup=cancel_keyboard("admin:to_number"))
 
@@ -135,6 +157,8 @@ async def get_lecture_file(message: Message, state: FSMContext):
         else:
             existing = repository.numbered(data["subject"], data["kind"], data["number"])
             title = f"{KINDS[data['kind']]} № {data['number']}"
+            if data.get("title"):
+                title += " — " + data["title"]
         if len(existing) > 1:
             raise ValueError("Несколько файлов имеют этот номер. Выберите конкретный файл через управление материалами.")
     except (ValueError, OSError) as exc:
@@ -165,7 +189,7 @@ async def save_material(callback: CallbackQuery, state: FSMContext):
             with LimitedBuffer() as buffer:
                 await callback.bot.download(data["file_id"], destination=buffer)
                 repository.save(data["subject"], data["kind"], data.get("number"),
-                                data["extension"], buffer.getvalue(), data["expected"], data.get("target_uid"))
+                                data["extension"], buffer.getvalue(), data["expected"], data.get("target_uid"), title=data.get("title"))
     except ConflictError as exc:
         await state.clear()
         await screen(callback, str(exc), keyboard_admin)
@@ -181,7 +205,7 @@ async def save_material(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("admin:list:"))
 async def list_materials(callback: CallbackQuery, state: FSMContext):
     parts = callback.data.split(":")
-    if len(parts) not in (3, 4) or parts[2] not in FOLDERS or (len(parts) == 4 and (not parts[3].isascii() or not parts[3].isdigit() or len(parts[3]) > 6)):
+    if len(parts) not in (3, 4) or parts[2] not in SECTIONS or (len(parts) == 4 and (not parts[3].isascii() or not parts[3].isdigit() or len(parts[3]) > 6)):
         await callback.answer("Некорректная кнопка", show_alert=True)
         return
     await callback.answer()

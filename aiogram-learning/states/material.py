@@ -5,6 +5,7 @@ class AddMaterial(StatesGroup):
     subject = State()
     kind = State()
     number = State()
+    title = State()
     file = State()
     confirm = State()
     delete = State()

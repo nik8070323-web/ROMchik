@@ -13,7 +13,7 @@ from handlers.Subjects import router as subjects_router
 from handlers.admin import router as admin_router, denied_router
 
 # Загрузка токена
-load_dotenv(Path(__file__).resolve().parent / ".env")
+load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 TOKEN = os.getenv("BOT_TOKEN")
 
 

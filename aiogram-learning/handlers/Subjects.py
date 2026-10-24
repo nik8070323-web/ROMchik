@@ -1,6 +1,6 @@
 from pathlib import Path
 from aiogram.exceptions import TelegramAPIError
-from services.materials import repository, FOLDERS
+from services.materials import repository, FOLDERS, SECTIONS
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, FSInputFile
@@ -44,27 +44,21 @@ async def open_materials(callback: CallbackQuery, state: FSMContext = None):
 async def open_additional(callback: CallbackQuery, state: FSMContext = None):
     if state is not None:
         await state.clear()
-    await callback.answer()
-
-    if isinstance(callback.message, Message):
-        await callback.message.edit_text(
-            "Дополнительные материалы:",
-            reply_markup=get_additional_keyboard()
-        )
+    await open_subject(callback)
 
 
 @router.callback_query(F.data.startswith("subject:"))
 async def open_subject(callback: CallbackQuery):
     parts = (callback.data or "").split(":")
-    if len(parts) not in (2, 3) or (len(parts) == 3 and (not parts[2].isascii() or not parts[2].isdigit() or len(parts[2]) > 6)):
+    if callback.data != "additional" and (len(parts) not in (2, 3) or (len(parts) == 3 and (not parts[2].isascii() or not parts[2].isdigit() or len(parts[2]) > 6))):
         await callback.answer("Некорректная кнопка", show_alert=True)
         return
     await callback.answer()
-    subject = parts[1]
+    subject = "Дополнительно" if callback.data == "additional" else parts[1]
     if not isinstance(callback.message, Message):
         return
     try:
-        materials = repository.list(subject) if subject in FOLDERS else []
+        materials = repository.list(subject) if subject in SECTIONS else []
     except (OSError, ValueError):
         await callback.message.answer("Не удалось прочитать каталог. Попробуйте позже.")
         return
@@ -81,7 +75,7 @@ async def open_subject(callback: CallbackQuery):
         builder.button(text="← Предыдущие", callback_data=f"subject:{subject}:{page - 1}")
     if (page + 1) * size < len(materials):
         builder.button(text="Следующие →", callback_data=f"subject:{subject}:{page + 1}")
-    builder.button(text="← Назад", callback_data="materials")
+    builder.button(text="← Назад", callback_data="back" if subject == "Дополнительно" else "materials")
     builder.adjust(1)
     await callback.message.edit_text(f"📚 Материалы по предмету «{subject}»:", reply_markup=builder.as_markup())
 

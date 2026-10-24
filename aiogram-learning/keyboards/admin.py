@@ -1,6 +1,5 @@
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from keyboards.subject import subjects
-from services.materials import KINDS
+from services.materials import KINDS, SECTIONS
 
 
 def buttons(*rows):
@@ -21,7 +20,7 @@ keyboard_admin = buttons(
 
 def get_admin_subjects_keyboard(manage=False):
     prefix = "admin:list" if manage else "admin:subject"
-    return buttons(*[(sub, f"{prefix}:{sub}") for sub in subjects], ("↩️ Назад", "admin:back"))
+    return buttons(*[(sub, f"{prefix}:{sub}") for sub in SECTIONS], ("↩️ Назад", "admin:back"))
 
 
 def kinds_keyboard():

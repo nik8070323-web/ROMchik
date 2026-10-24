@@ -10,6 +10,7 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FOLDERS = {"МДК": "мдк", "ОИТ": "оит", "ИНО": "ИНО"}
+SECTIONS = {**FOLDERS, "Дополнительно": "дополнительно"}
 KINDS = {"lecture": "Лекция", "practice": "Практика"}
 MAX_SIZE = 20 * 1024 * 1024
 EXTENSIONS = {".pdf", ".docx"}
@@ -38,7 +39,17 @@ class Material:
 
     @property
     def title(self):
-        return f"{KINDS[self.kind]} № {self.number}" if self.number else self.path.stem
+        label = f"{KINDS[self.kind]} № {self.number}" if self.number else self.path.stem
+        if self.number and " — " in self.path.stem:
+            label += " — " + self.path.stem.split(" — ", 1)[1]
+        return label
+
+
+def validate_title(text):
+    text = (text or "").strip()
+    if not text or len(text.encode("utf-8")) > 180 or any(c in text for c in '/\\') or any(ord(c) < 32 for c in text):
+        raise ValueError("Введите название до 180 байт (примерно 90 русских букв), без переносов строк и символов / и \\.")
+    return text
 
 
 def parse_number(text):
@@ -76,9 +87,9 @@ class MaterialRepository:
         self.root = Path(root)
 
     def folder(self, subject, kind):
-        if subject not in FOLDERS or kind not in KINDS:
+        if subject not in SECTIONS or kind not in KINDS:
             raise ValueError("Неизвестный предмет или тип материала.")
-        path = self.root / FOLDERS[subject]
+        path = self.root / SECTIONS[subject]
         if kind == "practice":
             path /= "практики"
         # Never follow redirected storage directories outside the repository.
@@ -90,13 +101,13 @@ class MaterialRepository:
 
     def list(self, subject=None, kind=None):
         result = []
-        for sub in ([subject] if subject else FOLDERS):
+        for sub in ([subject] if subject else SECTIONS):
             for category in ([kind] if kind else KINDS):
                 for path in self.folder(sub, category).glob("*"):
                     if path.is_symlink() or not path.is_file() or path.suffix.lower() not in EXTENSIONS:
                         continue
                     stat = path.stat()
-                    match = re.search(r"(?:^|[_ №-])(\d+)$", path.stem)
+                    match = re.search(r"(?:^|[_ №-])(\d+)$", path.stem.split(" — ", 1)[0])
                     number = int(match[1]) if match and int(match[1]) > 0 else None
                     uid = hashlib.sha256(str(path.relative_to(self.root)).encode()).hexdigest()[:20]
                     revision = f"{stat.st_ino}:{stat.st_size}:{stat.st_mtime_ns}:{stat.st_ctime_ns}"
@@ -113,7 +124,7 @@ class MaterialRepository:
     def snapshot(materials):
         return {m.uid: m.revision for m in materials}
 
-    def save(self, subject, kind, number, extension, content, expected, target_uid=None):
+    def save(self, subject, kind, number, extension, content, expected, target_uid=None, title=None):
         validate_content(content, extension)
         folder = self.folder(subject, kind)
         if target_uid:
@@ -125,7 +136,8 @@ class MaterialRepository:
         else:
             number = parse_number(str(number))
             current = self.numbered(subject, kind, number)
-            destination = folder / f"{kind}_{number}{extension}"
+            suffix = " — " + validate_title(title) if title else ""
+            destination = folder / f"{kind}_{number}{suffix}{extension}"
         if self.snapshot(current) != expected:
             raise ConflictError("Материалы изменились. Повторите выбор и подтвердите актуальную замену.")
         if len(current) > 1:
@@ -170,9 +182,8 @@ class MaterialRepository:
 
     def statistics(self):
         materials = self.list()
-        extras = self.root / "дополнительно"
-        extra_count = sum(1 for p in extras.glob("*") if p.is_file() and not p.is_symlink() and p.suffix.lower() in EXTENSIONS) if not extras.is_symlink() else 0
-        return materials, extra_count
+        return ([m for m in materials if m.subject != "Дополнительно"],
+                sum(m.subject == "Дополнительно" for m in materials))
 
 
 repository = MaterialRepository()

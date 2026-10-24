@@ -59,6 +59,18 @@ class RepositoryTests(unittest.TestCase):
         (extra / 'backup.pdf.original').write_bytes(PDF)
         self.assertEqual(self.repo.statistics()[1], 1)
 
+    def test_named_material_survives_reload_and_replacement(self):
+        path = self.save(title='Введение — часть 2')
+        repo = MaterialRepository(self.repo.root)
+        item = repo.numbered('МДК', 'lecture', 1)[0]
+        self.assertEqual(item.title, 'Лекция № 1 — Введение — часть 2')
+        repo.save('МДК', 'lecture', 1, '.docx', docx(), repo.snapshot([item]), item.uid)
+        self.assertFalse(path.exists())
+        self.assertEqual(repo.list()[0].title, item.title)
+        for title in ('../escape', 'a/b', 'a\\b', 'x' * 181):
+            with self.assertRaises(ValueError):
+                self.save(number=2, title=title)
+
     def test_revision_conflicts_and_delete(self):
         path = self.save()
         material = self.repo.list()[0]
