@@ -14,6 +14,7 @@ SECTIONS = {**FOLDERS, "Дополнительно": "дополнительно
 KINDS = {"lecture": "Лекция", "practice": "Практика"}
 MAX_SIZE = 20 * 1024 * 1024
 EXTENSIONS = {".pdf", ".docx"}
+CATALOG_EXTENSIONS = EXTENSIONS | {".doc", ".xlsx", ".xls", ".txt", ".png", ".jpg", ".jpeg"}
 
 
 class ConflictError(ValueError):
@@ -39,6 +40,8 @@ class Material:
 
     @property
     def title(self):
+        if self.kind == "practice" and self.path.parent.name.casefold() not in {"практики", "practices"}:
+            return f"{self.path.parent.name} — {self.path.name}"
         label = f"{KINDS[self.kind]} № {self.number}" if self.number else self.path.stem
         if self.number and " — " in self.path.stem:
             label += " — " + self.path.stem.split(" — ", 1)[1]
@@ -89,9 +92,15 @@ class MaterialRepository:
     def folder(self, subject, kind):
         if subject not in SECTIONS or kind not in KINDS:
             raise ValueError("Неизвестный предмет или тип материала.")
-        path = self.root / SECTIONS[subject]
+        def existing(parent, name):
+            matches = sorted(p for p in parent.iterdir() if p.name.casefold() == name.casefold()) if parent.exists() else []
+            return matches[0] if matches else parent / name
+
+        path = existing(self.root, SECTIONS[subject])
         if kind == "practice":
-            path /= "практики"
+            path = existing(path, "Практики")
+        elif existing(path, "Лекции").exists():
+            path = existing(path, "Лекции")
         # Never follow redirected storage directories outside the repository.
         if self.root.is_symlink() or any(p.is_symlink() for p in (path, path.parent)):
             raise ValueError("Папка материалов не должна быть символической ссылкой.")
@@ -103,8 +112,16 @@ class MaterialRepository:
         result = []
         for sub in ([subject] if subject else SECTIONS):
             for category in ([kind] if kind else KINDS):
-                for path in self.folder(sub, category).glob("*"):
-                    if path.is_symlink() or not path.is_file() or path.suffix.lower() not in EXTENSIONS:
+                folder = self.folder(sub, category)
+                for path in folder.rglob("*"):
+                    relative = path.relative_to(folder)
+                    if any(part.startswith(".") for part in relative.parts):
+                        continue
+                    if any(parent.is_symlink() for parent in (path, *path.parents) if parent != self.root.parent):
+                        continue
+                    if category == "lecture" and any(part.casefold() == "практики" for part in relative.parts[:-1]):
+                        continue
+                    if not path.is_file() or path.suffix.lower() not in CATALOG_EXTENSIONS:
                         continue
                     stat = path.stat()
                     match = re.search(r"(?:^|[_ №-])(\d+)$", path.stem.split(" — ", 1)[0])

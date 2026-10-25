@@ -53,6 +53,22 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
                 await Subjects.open_subject(self.callback('subject:нет'))
                 self.assertIsNotNone(edit.call_args.kwargs['reply_markup'])
 
+    async def test_subject_categories_and_practice_delivery(self):
+        with patch.object(CallbackQuery, 'answer', new_callable=AsyncMock):
+            with patch.object(Message, 'edit_text', new_callable=AsyncMock) as edit:
+                await Subjects.open_subject(self.callback('subject:МДК'))
+                rows = edit.call_args.kwargs['reply_markup'].inline_keyboard
+                self.assertEqual(rows[0][0].callback_data, 'catalog:МДК:lecture:0')
+                self.assertEqual(rows[1][0].callback_data, 'catalog:МДК:practice:0')
+                await Subjects.open_subject(self.callback(rows[1][0].callback_data))
+                self.assertIn('Практики', edit.call_args.args[0])
+                rows = edit.call_args.kwargs['reply_markup'].inline_keyboard
+                self.assertEqual(rows[-1][0].callback_data, 'subject:МДК')
+                with patch.object(Message, 'answer_document', new_callable=AsyncMock) as document:
+                    await Subjects.send_material(self.callback(rows[0][0].callback_data))
+                    document.assert_awaited_once()
+                    self.assertIn('Практики', str(document.call_args.args[0].path))
+
     async def test_start_without_image(self):
         with patch.object(Path, 'is_file', return_value=False):
             with patch.object(Message, 'answer', new_callable=AsyncMock) as answer:

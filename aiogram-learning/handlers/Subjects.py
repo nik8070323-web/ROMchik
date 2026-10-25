@@ -47,9 +47,17 @@ async def open_additional(callback: CallbackQuery, state: FSMContext = None):
     await open_subject(callback)
 
 
+@router.callback_query(F.data.startswith("catalog:"))
 @router.callback_query(F.data.startswith("subject:"))
 async def open_subject(callback: CallbackQuery):
     parts = (callback.data or "").split(":")
+    category = None
+    if parts[0] == "catalog":
+        if len(parts) != 4 or parts[2] not in ("lecture", "practice"):
+            await callback.answer("Некорректная кнопка", show_alert=True)
+            return
+        category = parts[2]
+        parts = ["subject", parts[1], parts[3]]
     if callback.data != "additional" and (len(parts) not in (2, 3) or (len(parts) == 3 and (not parts[2].isascii() or not parts[2].isdigit() or len(parts[2]) > 6))):
         await callback.answer("Некорректная кнопка", show_alert=True)
         return
@@ -57,27 +65,39 @@ async def open_subject(callback: CallbackQuery):
     subject = "Дополнительно" if callback.data == "additional" else parts[1]
     if not isinstance(callback.message, Message):
         return
+    if subject in FOLDERS and category is None:
+        builder = InlineKeyboardBuilder()
+        builder.button(text="📖 Лекции", callback_data=f"catalog:{subject}:lecture:0")
+        builder.button(text="📝 Практики", callback_data=f"catalog:{subject}:practice:0")
+        builder.button(text="← Предметы", callback_data="materials")
+        builder.adjust(1)
+        await callback.message.edit_text(f"📚 {subject}: выбери тип материалов:", reply_markup=builder.as_markup())
+        return
+    prefix = f"catalog:{subject}:{category}" if category else f"subject:{subject}"
+    back = f"subject:{subject}" if category else "back"
     try:
-        materials = repository.list(subject) if subject in SECTIONS else []
+        materials = repository.list(subject, category) if subject in SECTIONS else []
     except (OSError, ValueError):
         await callback.message.answer("Не удалось прочитать каталог. Попробуйте позже.")
         return
     if not materials:
         await callback.message.edit_text(
-            f"Для предмета «{subject}» файлов пока нет.", reply_markup=get_subjects_keyboard())
+            f"В этом разделе предмета «{subject}» файлов пока нет.",
+            reply_markup=InlineKeyboardBuilder().button(text="← Назад", callback_data=back).as_markup())
         return
     size = 15
     page = min(int(parts[2]) if len(parts) == 3 else 0, (len(materials) - 1) // size)
     builder = InlineKeyboardBuilder()
     for material in materials[page * size:(page + 1) * size]:
-        builder.button(text=material.title, callback_data=f"material:{material.uid}")
+        builder.button(text=f"{material.title} ({material.path.suffix[1:].upper()})", callback_data=f"material:{material.uid}")
     if page:
-        builder.button(text="← Предыдущие", callback_data=f"subject:{subject}:{page - 1}")
+        builder.button(text="← Предыдущие", callback_data=f"{prefix}:{page - 1}")
     if (page + 1) * size < len(materials):
-        builder.button(text="Следующие →", callback_data=f"subject:{subject}:{page + 1}")
-    builder.button(text="← Назад", callback_data="back" if subject == "Дополнительно" else "materials")
+        builder.button(text="Следующие →", callback_data=f"{prefix}:{page + 1}")
+    builder.button(text="← Назад", callback_data=back)
     builder.adjust(1)
-    await callback.message.edit_text(f"📚 Материалы по предмету «{subject}»:", reply_markup=builder.as_markup())
+    label = {"lecture": "Лекции", "practice": "Практики"}.get(category, "Материалы")
+    await callback.message.edit_text(f"📚 {label} по предмету «{subject}»:", reply_markup=builder.as_markup())
 
 
 @router.callback_query(F.data.startswith("material:"))

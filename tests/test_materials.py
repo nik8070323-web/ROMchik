@@ -31,6 +31,25 @@ class RepositoryTests(unittest.TestCase):
         values.update(kwargs)
         return self.repo.save(**values)
 
+    def test_nested_updated_catalog_and_attachments(self):
+        subject = self.repo.root / 'МДК'
+        lectures = subject / 'Лекции'
+        practice = subject / 'Практики' / 'PZ6'
+        lectures.mkdir(parents=True)
+        practice.mkdir(parents=True)
+        (lectures / 'МДК_1.pdf').write_bytes(PDF)
+        for name in ('Задание.pdf', 'Письмо.docx', 'Таблицы.xlsx', 'Заметки.txt', 'Приказ.png', 'Образец.doc'):
+            (practice / name).write_bytes(b'example')
+        (practice / 'hidden.pdf.original').write_bytes(PDF)
+        (practice / 'linked.pdf').symlink_to(lectures / 'МДК_1.pdf')
+        self.assertEqual(len(self.repo.list('МДК', 'lecture')), 1)
+        items = self.repo.list('МДК', 'practice')
+        self.assertEqual(len(items), 6)
+        self.assertTrue(all(m.title.startswith('PZ6 — ') for m in items))
+        self.assertEqual(self.repo.folder('МДК', 'lecture'), lectures)
+        self.assertEqual(self.repo.folder('МДК', 'practice'), practice.parent)
+        self.assertEqual(self.repo.get(items[0].uid), items[0])
+
     def test_legacy_and_cross_extension_replacement(self):
         folder = self.repo.folder('МДК', 'lecture')
         folder.mkdir()

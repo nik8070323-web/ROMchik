@@ -81,6 +81,7 @@ class AdminFlowTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(len(repo.list()), 1)
                 material = repo.list()[0]
                 await feed(callback='subject:МДК')
+                await feed(callback='catalog:МДК:practice:0')
                 markup = requests.call_args.args[1].reply_markup
                 self.assertIn('Практика № 1', str(markup))
                 await feed(callback=f'material:{material.uid}')
