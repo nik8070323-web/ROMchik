@@ -13,7 +13,7 @@ FOLDERS = {"МДК": "мдк", "ОИТ": "оит", "ИНО": "ИНО"}
 SECTIONS = {**FOLDERS, "Дополнительно": "дополнительно"}
 KINDS = {"lecture": "Лекция", "practice": "Практика"}
 MAX_SIZE = 20 * 1024 * 1024
-EXTENSIONS = {".pdf", ".docx"}
+EXTENSIONS = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".png", ".jpg", ".jpeg", ".zip"}
 CATALOG_EXTENSIONS = EXTENSIONS | {".doc", ".xlsx", ".xls", ".txt", ".png", ".jpg", ".jpeg"}
 
 
@@ -37,9 +37,13 @@ class Material:
     uid: str
     revision: str
     size: int
+    display_title: str | None = None
 
     @property
     def title(self):
+        if self.display_title:
+            label = f"{KINDS[self.kind]} № {self.number}" if self.number else self.path.stem
+            return label + " — " + self.display_title
         if self.kind == "practice" and self.path.parent.name.casefold() not in {"практики", "practices"}:
             return f"{self.path.parent.name} — {self.path.name}"
         label = f"{KINDS[self.kind]} № {self.number}" if self.number else self.path.stem
@@ -65,7 +69,7 @@ def parse_number(text):
 def validate_document(filename, size):
     extension = Path(filename or "").suffix.lower()
     if extension not in EXTENSIONS:
-        raise ValueError("Отправьте документ PDF или DOCX.")
+        raise ValueError("Неподдерживаемый формат документа.")
     if not size or not 0 < size <= MAX_SIZE:
         raise ValueError("Размер файла должен быть от 1 байта до 20 МБ.")
     return extension
@@ -76,7 +80,7 @@ def validate_content(content, extension):
     if extension == ".pdf":
         if not content.startswith(b"%PDF-"):
             raise ValueError("Содержимое файла не соответствует PDF.")
-    else:
+    elif extension == ".docx":
         try:
             with zipfile.ZipFile(io.BytesIO(content)) as archive:
                 if not {"[Content_Types].xml", "word/document.xml"}.issubset(archive.namelist()):
@@ -203,4 +207,14 @@ class MaterialRepository:
                 sum(m.subject == "Дополнительно" for m in materials))
 
 
-repository = MaterialRepository()
+# Local backend remains available only for explicit offline tests/development.
+if os.getenv("MATERIAL_STORAGE", "drive") == "local":
+    repository = MaterialRepository()
+else:
+    from services.drive import DriveRepository
+    repository = DriveRepository()
+
+
+async def call(repository, method, *args, **kwargs):
+    import asyncio
+    return await asyncio.to_thread(getattr(repository, method), *args, **kwargs)

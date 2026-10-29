@@ -1,5 +1,6 @@
 import sys
 import unittest
+import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -12,6 +13,28 @@ from keyboards.subject import get_subjects_keyboard, get_additional_keyboard
 
 
 class HandlerTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        from services.materials import MaterialRepository
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        base = Path(temporary.name)
+        repo = MaterialRepository(base / 'лекции')
+        for subject in Subjects.FOLDERS:
+            folder = repo.folder(subject, 'lecture')
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / 'lecture_1.pdf').write_bytes(b'%PDF-1.4 fixture')
+        folder = repo.folder('МДК', 'practice')
+        folder.mkdir(parents=True)
+        (folder / 'practice_1.pdf').write_bytes(b'%PDF-1.4 practice')
+        folder = repo.folder('Дополнительно', 'lecture')
+        folder.mkdir(parents=True)
+        for name in Subjects.EXTRA_FILES.values():
+            (folder / name).write_bytes(b'offline fixture')
+        for target, attr, value in ((Subjects, 'repository', repo), (Subjects, 'BASE_DIR', base)):
+            patcher = patch.object(target, attr, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
     def message(self):
         return Message(
             message_id=1, date=0, chat={'id': 1, 'type': 'private'},

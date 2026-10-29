@@ -1,11 +1,10 @@
+from config import load_environment
+
 import os
-from pathlib import Path
 
 from aiogram.filters import BaseFilter
 from aiogram.types import Message, CallbackQuery
-from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
 ADMIN_IDS = {
     int(user_id.strip())

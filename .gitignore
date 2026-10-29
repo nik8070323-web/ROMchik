@@ -22,3 +22,31 @@ __pycache__/
 
 # Incomplete material uploads and replacement recovery files
 .upload-*
+
+# Educational content and OAuth credentials
+*.pdf
+*.doc
+*.docx
+*.xls
+*.xlsx
+*.ppt
+*.pptx
+*.zip
+aiogram-learning/лекции/
+aiogram-learning/materials/
+.secrets/
+*token*.json
+*credentials*.json
+client_secret*.json
+migration-output/
+*.tmp
+
+# Loose documents (Python requirements remain source)
+*.txt
+!requirements.txt
+!**/requirements.txt
+*.png
+*.jpg
+*.jpeg
+!images/
+!images/**

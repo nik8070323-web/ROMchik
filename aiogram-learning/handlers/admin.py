@@ -1,5 +1,7 @@
 import asyncio
 import secrets
+import tempfile
+from pathlib import Path
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramAPIError
@@ -12,7 +14,7 @@ from keyboards.admin import (buttons, cancel_keyboard, get_admin_subjects_keyboa
                              keyboard_admin, kinds_keyboard, material_list_keyboard)
 from keyboards.menu import keyboard as main_keyboard
 from services.materials import (ConflictError, FOLDERS, SECTIONS, KINDS, LimitedBuffer,
-                               repository, parse_number, validate_document, validate_title)
+                               repository, call, parse_number, validate_document, validate_title)
 from states.material import AddMaterial
 
 router = Router()
@@ -50,7 +52,7 @@ async def menu(callback: CallbackQuery, state: FSMContext):
         await screen(callback, "📁 Выберите предмет", get_admin_subjects_keyboard(manage=True))
     elif action == "admin:stats":
         try:
-            materials, extra = repository.statistics()
+            materials, extra = await call(repository, "statistics")
             lectures = sum(m.kind == "lecture" for m in materials)
             practices = sum(m.kind == "practice" for m in materials)
             lines = [f"Предметов: {len(FOLDERS)}", f"Лекций: {lectures}",
@@ -102,7 +104,7 @@ async def step_back(callback: CallbackQuery, state: FSMContext):
         await screen(callback, "Введите номер материала", cancel_keyboard("admin:to_kind"))
     else:
         await state.set_state(AddMaterial.file)
-        await screen(callback, "Отправьте PDF или DOCX до 20 МБ.", cancel_keyboard())
+        await screen(callback, "Отправьте поддерживаемый документ до 20 МБ.", cancel_keyboard())
 
 
 @router.message(AddMaterial.number)
@@ -123,7 +125,7 @@ async def skip_title(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await state.update_data(title=None)
     await state.set_state(AddMaterial.file)
-    await screen(callback, "📎 Отправьте PDF или DOCX до 20 МБ.", cancel_keyboard("admin:to_number"))
+    await screen(callback, "📎 Отправьте поддерживаемый документ до 20 МБ.", cancel_keyboard("admin:to_number"))
 
 
 @router.message(AddMaterial.title)
@@ -136,29 +138,31 @@ async def get_material_title(message: Message, state: FSMContext):
         return
     await state.update_data(title=title)
     await state.set_state(AddMaterial.file)
-    await message.answer("📎 Отправьте PDF или DOCX до 20 МБ.", reply_markup=cancel_keyboard("admin:to_number"))
+    await message.answer("📎 Отправьте поддерживаемый документ до 20 МБ.", reply_markup=cancel_keyboard("admin:to_number"))
 
 
 @router.message(AddMaterial.file)
 async def get_lecture_file(message: Message, state: FSMContext):
     document = message.document
     if document is None:
-        await message.answer("Отправьте файл как документ PDF или DOCX.", reply_markup=cancel_keyboard())
+        await message.answer("Отправьте файл как документ поддерживаемый документ.", reply_markup=cancel_keyboard())
         return
     data = await state.get_data()
     try:
         extension = validate_document(document.file_name, document.file_size)
         if data.get("target_uid"):
-            target = repository.get(data["target_uid"])
+            target = await call(repository, "get", data["target_uid"])
             if target is None:
                 raise ValueError("Материал удалён. Откройте /admin заново.")
             existing = [target]
             title = target.title
         else:
-            existing = repository.numbered(data["subject"], data["kind"], data["number"])
+            existing = await call(repository, "numbered", data["subject"], data["kind"], data["number"])
             title = f"{KINDS[data['kind']]} № {data['number']}"
             if data.get("title"):
                 title += " — " + data["title"]
+        if hasattr(repository, "save_path") and not data.get("target_uid"):
+            existing = []
         if len(existing) > 1:
             raise ValueError("Несколько файлов имеют этот номер. Выберите конкретный файл через управление материалами.")
     except (ValueError, OSError) as exc:
@@ -166,7 +170,7 @@ async def get_lecture_file(message: Message, state: FSMContext):
         await message.answer(text, reply_markup=cancel_keyboard())
         return
     nonce = secrets.token_hex(8)
-    await state.update_data(file_id=document.file_id, extension=extension,
+    await state.update_data(file_id=document.file_id, filename=Path((document.file_name or "document").replace("\\", "/")).name, extension=extension,
                             expected=repository.snapshot(existing), nonce=nonce)
     await state.set_state(AddMaterial.confirm)
     warning = "\n⚠️ Материал существует. Подтверждение заменит его файл." if existing else ""
@@ -186,10 +190,19 @@ async def save_material(callback: CallbackQuery, state: FSMContext):
     await callback.answer("Сохраняю…")
     try:
         async with mutation_lock:
-            with LimitedBuffer() as buffer:
-                await callback.bot.download(data["file_id"], destination=buffer)
-                repository.save(data["subject"], data["kind"], data.get("number"),
-                                data["extension"], buffer.getvalue(), data["expected"], data.get("target_uid"), title=data.get("title"))
+            if hasattr(repository, "save_path"):
+                with tempfile.TemporaryDirectory(prefix="romchik-upload-") as directory:
+                    path = Path(directory) / "upload"
+                    with path.open("w+b") as output:
+                        await callback.bot.download(data["file_id"], destination=output)
+                    validate_document(data["filename"], path.stat().st_size)
+                    await call(repository, "save_path", data["subject"], data["kind"], data.get("number"),
+                               path, data["filename"], data["expected"], data.get("target_uid"), title=data.get("title"))
+            else:
+                with LimitedBuffer() as buffer:
+                    await callback.bot.download(data["file_id"], destination=buffer)
+                    await call(repository, "save", data["subject"], data["kind"], data.get("number"),
+                               data["extension"], buffer.getvalue(), data["expected"], data.get("target_uid"), title=data.get("title"))
     except ConflictError as exc:
         await state.clear()
         await screen(callback, str(exc), keyboard_admin)
@@ -198,8 +211,12 @@ async def save_material(callback: CallbackQuery, state: FSMContext):
         await state.set_state(AddMaterial.file)
         await screen(callback, "Не удалось скачать или сохранить файл. Проверьте формат, размер и доступ к диску, затем отправьте файл повторно.", cancel_keyboard())
         return
-    await state.clear()
-    await screen(callback, "✅ Материал сохранён и доступен в каталоге.", keyboard_admin)
+    if hasattr(repository, "save_path") and not data.get("target_uid"):
+        await state.set_state(AddMaterial.file)
+        await screen(callback, "✅ Файл сохранён. Отправьте следующий файл в этот номер или нажмите «Готово».", buttons(("Готово", "admin:back")))
+    else:
+        await state.clear()
+        await screen(callback, "✅ Материал сохранён и доступен в каталоге.", keyboard_admin)
 
 
 @router.callback_query(F.data.startswith("admin:list:"))
@@ -211,7 +228,7 @@ async def list_materials(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await state.clear()
     try:
-        materials = repository.list(parts[2])
+        materials = await call(repository, "list", parts[2])
         await screen(callback, f"📁 {parts[2]}: лекции и практики" if materials else "Материалов пока нет.",
                      material_list_keyboard(materials, parts[2], int(parts[3]) if len(parts) == 4 else 0))
     except (OSError, ValueError):
@@ -222,7 +239,7 @@ async def list_materials(callback: CallbackQuery, state: FSMContext):
 async def material_action(callback: CallbackQuery, state: FSMContext):
     _, action, uid = callback.data.split(":", 2)
     try:
-        material = repository.get(uid)
+        material = await call(repository, "get", uid)
     except (OSError, ValueError):
         await callback.answer("Не удалось прочитать каталог", show_alert=True)
         return
@@ -239,7 +256,7 @@ async def material_action(callback: CallbackQuery, state: FSMContext):
     elif action == "replace":
         await state.update_data(subject=material.subject, kind=material.kind, number=material.number, target_uid=uid)
         await state.set_state(AddMaterial.file)
-        await screen(callback, info + "\nОтправьте новый PDF или DOCX до 20 МБ.", cancel_keyboard(f"admin:view:{uid}"))
+        await screen(callback, info + "\nОтправьте новый поддерживаемый документ до 20 МБ.", cancel_keyboard(f"admin:view:{uid}"))
     else:
         nonce = secrets.token_hex(8)
         await state.update_data(uid=uid, revision=material.revision, nonce=nonce)
@@ -257,7 +274,7 @@ async def delete_material(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     try:
         async with mutation_lock:
-            repository.delete(data["uid"], data["revision"])
+            await call(repository, "delete", data["uid"], data["revision"])
         text = "✅ Материал удалён."
     except ConflictError as exc:
         text = str(exc)

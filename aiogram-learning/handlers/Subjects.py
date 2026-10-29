@@ -1,6 +1,6 @@
 from pathlib import Path
 from aiogram.exceptions import TelegramAPIError
-from services.materials import repository, FOLDERS, SECTIONS
+from services.materials import repository, call, FOLDERS, SECTIONS
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, FSInputFile
@@ -76,7 +76,7 @@ async def open_subject(callback: CallbackQuery):
     prefix = f"catalog:{subject}:{category}" if category else f"subject:{subject}"
     back = f"subject:{subject}" if category else "back"
     try:
-        materials = repository.list(subject, category) if subject in SECTIONS else []
+        materials = await call(repository, "list", subject, category) if subject in SECTIONS else []
     except (OSError, ValueError):
         await callback.message.answer("Не удалось прочитать каталог. Попробуйте позже.")
         return
@@ -88,8 +88,14 @@ async def open_subject(callback: CallbackQuery):
     size = 15
     page = min(int(parts[2]) if len(parts) == 3 else 0, (len(materials) - 1) // size)
     builder = InlineKeyboardBuilder()
+    grouped = {}
+    for material in materials:
+        key = (material.kind, material.number) if material.number else material.uid
+        grouped.setdefault(key, material)
+    materials = list(grouped.values())
+    page = min(page, (len(materials) - 1) // size)
     for material in materials[page * size:(page + 1) * size]:
-        builder.button(text=f"{material.title} ({material.path.suffix[1:].upper()})", callback_data=f"material:{material.uid}")
+        builder.button(text=(f"{material.title}" if material.number else f"{material.title} ({material.path.suffix[1:].upper()})"), callback_data=f"material:{material.uid}")
     if page:
         builder.button(text="← Предыдущие", callback_data=f"{prefix}:{page - 1}")
     if (page + 1) * size < len(materials):
@@ -103,13 +109,15 @@ async def open_subject(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("material:"))
 async def send_material(callback: CallbackQuery):
     try:
-        material = repository.get(callback.data.split(":", 1)[1])
+        material = await call(repository, "get", callback.data.split(":", 1)[1])
         if material is None:
             await callback.answer("Файл удалён. Откройте каталог заново.", show_alert=True)
             return
         await callback.answer()
         if isinstance(callback.message, Message):
-            await callback.message.answer_document(FSInputFile(material.path), caption=material.title)
+            materials = await call(repository, "numbered", material.subject, material.kind, material.number) if material.number else [material]
+            for item in materials:
+                await deliver(callback.message, item)
     except (OSError, ValueError, TelegramAPIError):
         if isinstance(callback.message, Message):
             await callback.message.answer("Не удалось отправить файл. Откройте каталог заново или попробуйте позже.")
@@ -125,7 +133,7 @@ async def send_lecture(callback: CallbackQuery):
 
     _, subject, index = parts
     try:
-        files = get_lecture_files(subject)
+        files = [m.path for m in await call(repository, "list", subject, "lecture")] if subject in FOLDERS else []
     except (OSError, ValueError):
         await callback.answer("Не удалось прочитать каталог", show_alert=True)
         return
@@ -138,6 +146,15 @@ async def send_lecture(callback: CallbackQuery):
         await callback.answer("Файл не найден", show_alert=True)
         return
 
+    if hasattr(repository, "local_file"):
+        materials = await call(repository, "list", subject, "lecture")
+        await callback.answer()
+        if isinstance(callback.message, Message):
+            try:
+                await deliver(callback.message, materials[int(index)])
+            except (OSError, ValueError, TelegramAPIError):
+                await callback.message.answer("Google Drive временно недоступен. Попробуйте позже.")
+        return
     file = files[int(index)]
 
     if not file.is_file():
@@ -161,6 +178,18 @@ async def send_additional(callback: CallbackQuery):
         await callback.answer("Файл не найден", show_alert=True)
         return
 
+    if hasattr(repository, "local_file"):
+        await callback.answer()
+        try:
+            matches = [m for m in await call(repository, "list", "Дополнительно") if m.path.name == filename]
+            if not matches:
+                raise ValueError("Файл отсутствует")
+            if isinstance(callback.message, Message):
+                await deliver(callback.message, matches[0])
+        except (OSError, ValueError, TelegramAPIError):
+            if isinstance(callback.message, Message):
+                await callback.message.answer("Материал отсутствует или Google Drive временно недоступен.")
+        return
     path = BASE_DIR / "лекции" / "дополнительно" / filename
 
     if not path.is_file():
@@ -177,3 +206,15 @@ async def send_additional(callback: CallbackQuery):
             await callback.message.answer_document(document=FSInputFile(path), caption=name)
         except (OSError, TelegramAPIError):
             await callback.message.answer("Не удалось отправить файл. Попробуйте позже.")
+
+async def deliver(message, material):
+    if not hasattr(repository, "local_file"):
+        await message.answer_document(FSInputFile(material.path), caption=material.title[:1024])
+        return
+    import asyncio
+    context = repository.local_file(material)
+    path = await asyncio.to_thread(context.__enter__)
+    try:
+        await message.answer_document(FSInputFile(path, filename=material.path.name), caption=material.title[:1024])
+    finally:
+        await asyncio.to_thread(context.__exit__, None, None, None)
